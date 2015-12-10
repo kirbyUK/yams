@@ -39,7 +39,23 @@ sub write_buckets
 
 get '/' => sub
 {
-    template 'index';
+	# Get the buckets:
+	my $buckets = get_buckets;
+
+	# Create the HTML from the bucket:
+	my $html;
+	foreach my $bucket(@{$buckets})
+	{
+		$html .= "<table>\n";
+		foreach my $ip(keys %{$bucket})
+		{
+			$html .= "\t<tr>\n\t\t<td>" . $ip . "</td>\n\t\t<td>" . $bucket->{"$ip"} .
+				"</td>\n\t</tr>\n";
+		}
+		$html .= "</table>\n";
+	}
+
+    template 'index', { "bucket" => $html };
 };
 
 post '/request' => sub
