@@ -1,1 +1,10 @@
+<form action="/request" method="post">
+	<table>
+		<tr>
+			<td><b>URL: </b></td>
+			<td><input type="text" name="url"></td>
+			<td><input type="submit" value="Submit"></td>
+		</tr>
+	</table>
+</form>
 <% bucket %>

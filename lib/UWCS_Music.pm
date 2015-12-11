@@ -92,6 +92,8 @@ post '/request' => sub
 
 	# Write the new buckets:
 	write_buckets $buckets;
+
+	redirect "/";
 };
 
 true;
