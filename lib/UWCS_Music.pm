@@ -3,7 +3,6 @@ use Dancer2;
 use JSON qw/encode_json decode_json/;
 
 our $VERSION = '0.1';
-
 our $BUCKET_FILE = "./public/bucket.json";
 
 # Open the buckets:
@@ -46,13 +45,13 @@ get '/' => sub
 	my $html;
 	foreach my $bucket(@{$buckets})
 	{
-		$html .= "<table>\n";
+		$html .= "<div class=\"bucket\">\n\t<table>\n";
 		foreach my $ip(keys %{$bucket})
 		{
 			$html .= "\t<tr>\n\t\t<td>" . $ip . "</td>\n\t\t<td>" . $bucket->{"$ip"} .
 				"</td>\n\t</tr>\n";
 		}
-		$html .= "</table>\n";
+		$html .= "\t</table>\n</div>\n";
 	}
 
     template 'index', { "bucket" => $html };
