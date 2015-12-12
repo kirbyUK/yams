@@ -1,6 +1,9 @@
 yams
 ====
 
+![Canned Yams](https://raw.guthubusercontent.com/kirbyUK/yams/master/canned-yams.png")
+*Don't you think it's cheating that your mother is using canned yams?*
+
 Yet Another Music Server for [UWCS](https://uwcs.co.uk) LAN parties. Use a
 simple web interface to queue video/song links or upload files which get
 placed into 'buckets'. Each user is allowed one file per bucket. The server
