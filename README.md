@@ -1,7 +1,7 @@
 yams
 ====
 
-![Canned Yams](https://raw.guthubusercontent.com/kirbyUK/yams/master/canned-yams.png")
+![Canned Yams](https://raw.githubusercontent.com/kirbyUK/yams/master/canned-yams.png)
 *Don't you think it's cheating that your mother is using canned yams?*
 
 Yet Another Music Server for [UWCS](https://uwcs.co.uk) LAN parties. Use a
