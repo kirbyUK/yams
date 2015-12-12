@@ -10,7 +10,7 @@ Why?
 ---
 
 Why use this server over any of the
-[many](https://uwcs.co.uk/cms/about/gaming/lans/music-servers/") that already
+[many](https://uwcs.co.uk/cms/about/gaming/lans/music-servers/) that already
 exists? This one tries to bring something new to the table:
 
 * Seperation between web client and music/video playback. This allows the parts
