@@ -1,0 +1,76 @@
+#!/usr/bin/perl -w
+use Getopt::Long;
+use JSON qw/encode_json decode_json/;
+use strict;
+
+sub usage;
+sub main;
+
+# The path to the player to use: 
+my $player = "/usr/bin/mpv";
+
+# Additional options to pass to the player:
+my $player_options = "";
+
+# The path to the downloader (most likely youtube-dl) to use:
+my $downloader = "/usr/bin/youtube-dl";
+
+# Additional options to pass to the downloader:
+my $downloader_options = "";
+
+# Path to the named pipe:
+my $pipe = "./yams-pipe";
+
+# Verbose flag:
+my $verbose = 0;
+
+# Help flag:
+my $help = 0;
+
+# Process command-line options:
+GetOptions(
+	"help" => \$help,
+	"verbose" => \$verbose,
+	"player=s" => \$player,
+	"player-options=s" => \$player_options,
+	"downloader=s" => \$downloader,
+	"dowloader-options=s" => \$downloader_options,
+	"pipe=s" => \$pipe,
+);
+
+if($help) { usage } else { main }
+
+sub main
+{
+	# Verify the two executables given:
+	die "'$player' is not an executable\n" unless(-f -x $player);
+	die "'$downloader' is not an executable\n" unless(-f -x $downloader);
+
+	# Verify the pipe gvein:
+	die "'$pipe' is not a named pipe (fifo)\n" unless(-p $pipe);
+}
+
+sub usage
+{
+	print "./yams [OPTIONS]\n\n";
+	print "Options:\n";
+	print "\t-h or --help\t\t\tDisplay this message\n";
+	print "\t-v or --verbose\t\t\tGive verbose output\n\n";
+	print "\t--player=PATH\t\t\tUse PATH as the media player\n";
+	print "\t\t\t\t\t\t(Default is /usr/bin/mpv)\n\n";
+	print "\t--player-options=ARGS\t\tWhere ARGS is a comma-seperated list of\n";
+	print "\t\t\t\t\targuments to pass to the player\n\n";
+	print "\t--downloader=PATH\t\tUse PATH to download requested media\n";
+	print "\t\t\t\t\t\t(Default is /usr/bin/youtube-dl)\n\n";
+	print "\t--downloaded-options=ARGS\tWhere ARGS is a comma-seperated list of\n";
+	print "\t\t\t\t\targuments to pass to the downloader\n\n";
+	print "\t--pipe=PATH\t\t\tUse PATH as the named pipe (fifo)\n";
+	print "\t\t\t\t\t\t(Default is to use/create one\n";
+	print "\t\t\t\t\t\tin the directory yams is\n";
+	print "\t\t\t\t\t\trun from called 'yams-pipe')\n\n";
+	print "Examples\n";
+	print "\tUse mplayer2 with direct rendering and looping the video twice:\n";
+	print "\t./yams --player='/usr/bin/mplayer2' --player-options='--dr,--loop=2'\n\n";
+	print "\tEnds the playback after 9 minutes and 6 seconds:\n";
+	print "\t./yams --player-options='--end=00:09:06'\n";
+}
