@@ -1,6 +1,7 @@
 #!/usr/bin/perl -w
 use Getopt::Long;
 use JSON qw/encode_json decode_json/;
+#use POSIX qw/makefifo/;
 use strict;
 
 sub usage;
@@ -19,7 +20,11 @@ my $downloader = "/usr/bin/youtube-dl";
 my $downloader_options = "";
 
 # Path to the named pipe:
-my $pipe = "./yams-pipe";
+my $DEFAULT_PIPE="./yams-pipe";
+my $pipe = $DEFAULT_PIPE;
+
+# Path to the JSON buckets file:
+my $buckets = "./buckets.json";
 
 # Verbose flag:
 my $verbose = 0;
@@ -36,6 +41,7 @@ GetOptions(
 	"downloader=s" => \$downloader,
 	"dowloader-options=s" => \$downloader_options,
 	"pipe=s" => \$pipe,
+	"buckets=s" => \$buckets,
 );
 
 if($help) { usage } else { main }
@@ -46,7 +52,7 @@ sub main
 	die "'$player' is not an executable\n" unless(-f -x $player);
 	die "'$downloader' is not an executable\n" unless(-f -x $downloader);
 
-	# Verify the pipe gvein:
+	# Verify the pipe given:
 	die "'$pipe' is not a named pipe (fifo)\n" unless(-p $pipe);
 }
 
@@ -67,7 +73,9 @@ sub usage
 	print "\t--pipe=PATH\t\t\tUse PATH as the named pipe (fifo)\n";
 	print "\t\t\t\t\t\t(Default is to use/create one\n";
 	print "\t\t\t\t\t\tin the directory yams is\n";
-	print "\t\t\t\t\t\trun from called 'yams-pipe')\n\n";
+	print "\t\t\t\t\t\trun from called '$DEFAULT_PIPE')\n\n";
+	print "\t--bucket=PATH\t\t\tUse PATH as the bucket file\n";
+	print "\t\t\t\t\t\t(Default is ./buckets.json)\n";
 	print "Examples\n";
 	print "\tUse mplayer2 with direct rendering and looping the video twice:\n";
 	print "\t./yams --player='/usr/bin/mplayer2' --player-options='--dr,--loop=2'\n\n";
