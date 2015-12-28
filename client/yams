@@ -1,11 +1,12 @@
 #!/usr/bin/perl -w
 use Getopt::Long;
 use JSON qw/encode_json decode_json/;
-#use POSIX qw/makefifo/;
+use POSIX qw/mkfifo :sys_wait_h/;
 use strict;
 
 sub usage;
 sub main;
+sub download;
 
 # The path to the player to use: 
 my $player = "/usr/bin/mpv";
@@ -52,8 +53,79 @@ sub main
 	die "'$player' is not an executable\n" unless(-f -x $player);
 	die "'$downloader' is not an executable\n" unless(-f -x $downloader);
 
-	# Verify the pipe given:
-	die "'$pipe' is not a named pipe (fifo)\n" unless(-p $pipe);
+	# If a non-existant pipe is given (including the default), make a new one:
+	my @pids;
+	while(1)
+	{
+		unless(-p $pipe)
+		{
+			# Make a new pipe if there isn't one (see 'perldoc perlipc'):
+			unlink $pipe or warn "Cannot unlink '$pipe': $!\n";
+			mkfifo($pipe, 0700) or die "Cannot make pipe '$pipe': $!\n";
+		}
+
+		# Read in from the pipe:
+		open my $ph, '<', $pipe or die "Cannot open pipe '$pipe': $!\n";
+		chomp(my $line = <$ph>);
+		close $ph;
+
+		# Print received command if verbose output is specified:
+		print "Received: '$line'\n" if($verbose);
+
+		# Check what the given command is:
+		if($line =~ /^download (.*)$/)
+		{
+			# We assume the URL given is correct, the server can do it (or I
+			# can add it later when I'm feeling less lazy):
+			my $url = $1;
+
+			# Fork the process:
+			my $pid = fork;
+			push @pids, $pid;
+
+			if(! defined $pid)
+			{
+				die "Cannot fork: $!\n";
+			}
+			# Child process:
+			elsif($pid == 0)
+			{
+				exit download($url);
+			}
+		}
+
+		# Cleanup any finished PIDs:
+		@pids = grep { waitpid($_, WNOHANG) <= 0 } @pids;
+	}
+}
+
+# Downloads the given URL using the global downloader and options, then updates
+# the buckets if everything worked. Returns the status of the downloader:
+sub download
+{
+	my $url = shift;
+
+	# Construct the arguments:
+	my @args = split(',', $downloader_options);
+	push @args, $url;
+
+	# Print the full command if verbose output is enabled:
+	print $downloader, " ", join(' ', @args), "\n" if($verbose);
+
+	# Execute the command:
+	my $status = system($downloader, @args);
+
+	if($status == 0)
+	{
+		print "Download of '$url' successful\n" if($verbose);
+		# update the buckets...
+	}
+	else
+	{
+		warn "Download of '$url' failed with status '$?'\n";
+	}
+
+	return $status;
 }
 
 sub usage
