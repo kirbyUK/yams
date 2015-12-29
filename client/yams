@@ -1,7 +1,10 @@
 #!/usr/bin/perl -w
+use Fcntl qw/:flock/;
+use File::Spec;
 use Getopt::Long;
-use JSON qw/encode_json decode_json/;
 use POSIX qw/mkfifo :sys_wait_h/;
+use DateTime;
+use JSON qw/encode_json decode_json/;
 use strict;
 
 sub usage;
@@ -25,7 +28,10 @@ my $DEFAULT_PIPE="./yams-pipe";
 my $pipe = $DEFAULT_PIPE;
 
 # Path to the JSON buckets file:
-my $buckets = "./buckets.json";
+my $buckets_json = "./buckets.json";
+
+# Path to directory to put videos in:
+my $media_dir = "./media/";
 
 # Verbose flag:
 my $verbose = 0;
@@ -42,7 +48,8 @@ GetOptions(
 	"downloader=s" => \$downloader,
 	"dowloader-options=s" => \$downloader_options,
 	"pipe=s" => \$pipe,
-	"buckets=s" => \$buckets,
+	"buckets=s" => \$buckets_json,
+	"media-dir=s" => \$media_dir,
 );
 
 if($help) { usage } else { main }
@@ -52,6 +59,26 @@ sub main
 	# Verify the two executables given:
 	die "'$player' is not an executable\n" unless(-f -x $player);
 	die "'$downloader' is not an executable\n" unless(-f -x $downloader);
+
+	# If the buckets file does not exist, create it:
+	if(! -f $buckets_json)
+	{
+		open my $file, '>', $buckets_json
+			or die "Cannot open '$buckets_json': $!\n";
+		flock($file, 2);
+		print $file "[ ]\n";
+		close $file;
+	}
+
+	# If the video dir does not exist, create it:
+	unless(-d File::Spec->canonpath($media_dir))
+	{
+		mkdir File::Spec->canonpath($media_dir)
+			or die
+				"Cannot create directory '",
+				File::Spec->canonpath($media_dir),
+				"': $!\n";
+	}
 
 	# If a non-existant pipe is given (including the default), make a new one:
 	my @pids;
@@ -73,11 +100,12 @@ sub main
 		print "Received: '$line'\n" if($verbose);
 
 		# Check what the given command is:
-		if($line =~ /^download (.*)$/)
+		if($line =~ /^download (.*) ((?:\d{1,3}\.){3}\d{1,3})$/)
 		{
 			# We assume the URL given is correct, the server can do it (or I
 			# can add it later when I'm feeling less lazy):
 			my $url = $1;
+			my $ip = $2;
 
 			# Fork the process:
 			my $pid = fork;
@@ -90,7 +118,7 @@ sub main
 			# Child process:
 			elsif($pid == 0)
 			{
-				exit download($url);
+				exit download($url, $ip);
 			}
 		}
 
@@ -103,10 +131,11 @@ sub main
 # the buckets if everything worked. Returns the status of the downloader:
 sub download
 {
-	my $url = shift;
+	my ($url, $ip) = @_;
 
 	# Construct the arguments:
 	my @args = split(',', $downloader_options);
+	push @args, "-o" . File::Spec->catfile($media_dir, "%(id)s.%(ext)s");
 	push @args, $url;
 
 	# Print the full command if verbose output is enabled:
@@ -118,7 +147,68 @@ sub download
 	if($status == 0)
 	{
 		print "Download of '$url' successful\n" if($verbose);
-		# update the buckets...
+
+		# Read the buckets file:
+		open my $file, '<', $buckets_json
+			or die "Cannot open '$buckets_json': $!\n";
+		flock($file, 1);
+		my $buckets;
+		{
+			# Slurp the file:
+			local $/;
+			$buckets = decode_json(<$file>);
+		}
+		close $file;
+
+		# Get the most recently added file:
+		# <http://stackoverflow.com/questions/328673/>
+		opendir my $dir, File::Spec->canonpath($media_dir)
+			or die "Cannot open '", File::Spec->canonpath($media_dir), "' $!\n";
+		my ($newest_name, $newest_time);
+		for my $file(readdir $dir)
+		{
+			my $path = File::Spec->catfile($media_dir, $file);
+			next if(-d $path);
+			if((! defined $newest_time) || (-M $path < $newest_time))
+			{
+				$newest_name = $path;
+				$newest_time = -M _;
+			}
+		}
+
+		# Add the newly downloaded file to the newest available bucket:
+		my $added = 0;
+		for my $bucket(@{$buckets})
+		{
+			# If the IP is not in this bucket, add in the file and date:
+			if(! defined $bucket->{$ip})
+			{
+				$bucket->{$ip} = {
+					"date" => DateTime->from_epoch("epoch" => time)->iso8601,
+					"file" => $newest_name,
+				};
+				$added = 1;
+				last;
+			}
+		}
+
+		# If every bucket was taken, make a new one:
+		if(! $added)
+		{
+			push @{$buckets}, {
+				$ip => {
+					"date" => DateTime->from_epoch("epoch" => time)->iso8601,
+					"file" => $newest_name,
+				},
+			};
+		}
+
+		# Write to the buckets file:
+		open $file, '>', $buckets_json
+			or die "Cannot open '$buckets_json': $!\n";
+		flock($file, 2);
+		print $file encode_json($buckets);
+		close $file;
 	}
 	else
 	{
@@ -147,7 +237,9 @@ sub usage
 	print "\t\t\t\t\t\tin the directory yams is\n";
 	print "\t\t\t\t\t\trun from called '$DEFAULT_PIPE')\n\n";
 	print "\t--bucket=PATH\t\t\tUse PATH as the bucket file\n";
-	print "\t\t\t\t\t\t(Default is ./buckets.json)\n";
+	print "\t\t\t\t\t\t(Default is ./buckets.json)\n\n";
+	print "\t--media-dir=PATH\t\tDownload media to PATH\n";
+	print "\t\t\t\t\t\t(Default is ./media/)\n";
 	print "Examples\n";
 	print "\tUse mplayer2 with direct rendering and looping the video twice:\n";
 	print "\t./yams --player='/usr/bin/mplayer2' --player-options='--dr,--loop=2'\n\n";
