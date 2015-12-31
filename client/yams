@@ -51,7 +51,7 @@ GetOptions(
 	"player=s" => \$player,
 	"player-options=s" => \$player_options,
 	"downloader=s" => \$downloader,
-	"dowloader-options=s" => \$downloader_options,
+	"downloader-options=s" => \$downloader_options,
 	"pipe=s" => \$pipe,
 	"buckets=s" => \$buckets_json,
 	"media-dir=s" => \$media_dir,
