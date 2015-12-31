@@ -2,7 +2,8 @@
 use Fcntl qw/:flock/;
 use File::Spec;
 use Getopt::Long;
-use POSIX qw/mkfifo :sys_wait_h/;
+use IO::Select;
+use POSIX qw/mkfifo :sys_wait_h O_RDONLY O_NONBLOCK/;
 use DateTime;
 use JSON qw/encode_json decode_json/;
 use strict;
@@ -10,6 +11,10 @@ use strict;
 sub usage;
 sub main;
 sub download;
+sub player;
+sub read_buckets;
+sub write_buckets;
+sub poll_fifo;
 
 # The path to the player to use: 
 my $player = "/usr/bin/mpv";
@@ -80,8 +85,10 @@ sub main
 				"': $!\n";
 	}
 
-	# If a non-existant pipe is given (including the default), make a new one:
+	# Keep a list of all PIDs except the player one, which is kept seperate as
+	# it must be explicitly checked for every 'frame':
 	my @pids;
+	my $player_pid = undef;
 	while(1)
 	{
 		unless(-p $pipe)
@@ -92,33 +99,53 @@ sub main
 		}
 
 		# Read in from the pipe:
-		open my $ph, '<', $pipe or die "Cannot open pipe '$pipe': $!\n";
-		chomp(my $line = <$ph>);
+		sysopen my $ph, $pipe, O_NONBLOCK|O_RDONLY
+			or die "Cannot open pipe '$pipe': $!\n";
+		chomp(my $line = <$ph>) if(poll_fifo($ph));
 		close $ph;
 
-		# Print received command if verbose output is specified:
-		print "Received: '$line'\n" if($verbose);
-
-		# Check what the given command is:
-		if($line =~ /^download (.*) ((?:\d{1,3}\.){3}\d{1,3})$/)
+		if(defined $line)
 		{
-			# We assume the URL given is correct, the server can do it (or I
-			# can add it later when I'm feeling less lazy):
-			my $url = $1;
-			my $ip = $2;
+			# Print received command if verbose output is specified:
+			print "Received: '$line'\n" if($verbose);
 
-			# Fork the process:
-			my $pid = fork;
-			push @pids, $pid;
+			# Check what the given command is:
+			if($line =~ /^download (.*) ((?:\d{1,3}\.){3}\d{1,3})$/)
+			{
+				# We assume the URL given is correct, the server can do it (or I
+				# can add it later when I'm feeling less lazy):
+				my $url = $1;
+				my $ip = $2;
 
-			if(! defined $pid)
+				# Fork the process:
+				my $pid = fork;
+				push @pids, $pid;
+
+				if(! defined $pid)
+				{
+					die "Cannot fork: $!\n";
+				}
+				# Child process:
+				elsif($pid == 0)
+				{
+					exit download($url, $ip);
+				}
+			}
+		}
+
+		# Check if the player has stopped going:
+		if((! defined $player_pid) || (waitpid($player_pid, WNOHANG) > 0))
+		{
+			# If so, reinvoke it:
+			$player_pid = fork;
+			if(! defined $player_pid)
 			{
 				die "Cannot fork: $!\n";
 			}
 			# Child process:
-			elsif($pid == 0)
+			elsif($player_pid == 0)
 			{
-				exit download($url, $ip);
+				exit player();
 			}
 		}
 
@@ -149,16 +176,7 @@ sub download
 		print "Download of '$url' successful\n" if($verbose);
 
 		# Read the buckets file:
-		open my $file, '<', $buckets_json
-			or die "Cannot open '$buckets_json': $!\n";
-		flock($file, 1);
-		my $buckets;
-		{
-			# Slurp the file:
-			local $/;
-			$buckets = decode_json(<$file>);
-		}
-		close $file;
+		my $buckets = read_buckets;
 
 		# Get the most recently added file:
 		# <http://stackoverflow.com/questions/328673/>
@@ -204,11 +222,7 @@ sub download
 		}
 
 		# Write to the buckets file:
-		open $file, '>', $buckets_json
-			or die "Cannot open '$buckets_json': $!\n";
-		flock($file, 2);
-		print $file encode_json($buckets);
-		close $file;
+		write_buckets $buckets;
 	}
 	else
 	{
@@ -216,6 +230,87 @@ sub download
 	}
 
 	return $status;
+}
+
+sub player
+{
+	my $buckets = read_buckets;
+
+	# If it is empty, exit with a success:
+	exit 0 if(@{$buckets} == 0);
+
+	# Otherwise, play the next item on the top of the list:
+	my @keys = sort
+			{ $buckets->[0]->{$b}->{"date"} cmp $buckets->[0]->{$a}->{"data"} }
+			keys %{$buckets->[0]};
+	my $next = shift @keys;
+
+	# Construct the arguments:
+	my @args = split(',', $player_options);
+	push @args, $buckets->[0]->{$next}->{"file"};
+
+	# Print the full command if verbose output is enabled:
+	print $player, " ", join(' ', @args), "\n" if($verbose);
+
+	# Execute the command:
+	my $status = system($player, @args);
+
+	warn "Player failed with code '$status'\n" if($status != 0);
+
+	# Either way, remove this entry from the JSON:
+	$buckets = read_buckets;
+	delete $buckets->[0]->{$next};
+
+	# If this bucket is empty, remove it completely:
+	shift @{$buckets} if(scalar(keys %{$buckets->[0]}) == 0);
+
+	write_buckets $buckets;
+
+	return $status;
+}
+
+# Opens the buckets file (using a shared lock), and returns the data as a
+# hashref:
+sub read_buckets
+{
+	# Open the buckets file:
+	open my $file, '<', $buckets_json
+		or die "Cannot open '$buckets_json': $!\n";
+	flock($file, 1);
+
+	# Slurp the file:
+	my $buckets;
+	{
+		local $/;
+		$buckets = decode_json(<$file>);
+	}
+
+	close $file;
+	return $buckets;
+}
+
+# Opens the buckets file (using an exclusive lock), and writes the passed
+# hashref to it:
+sub write_buckets
+{
+	my $buckets = shift;
+
+	open my $file, '>', $buckets_json
+		or die "Cannot open '$buckets_json': $!\n";
+	flock($file, 2);
+	print $file encode_json($buckets);
+	close $file;
+}
+
+# Given a filehandle, polls it to see if there is output read. Used for
+# non-blocking reads to the FIFO:
+# <http://http://docstore.mik.ua/orelly/perl/cookbook/ch07_14.htm>
+sub poll_fifo
+{
+	my $fh = shift;
+	my $select = IO::Select->new;
+	$select->add($fh);
+	return scalar($select->can_read(0));
 }
 
 sub usage
